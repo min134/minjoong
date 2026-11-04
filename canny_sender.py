@@ -51,6 +51,7 @@ config = picam2.create_video_configuration(
 )
 picam2.configure(config)
 stream = None
+camera_started = False
 
 try:
     stream = start_gstreamer()
@@ -58,6 +59,7 @@ try:
         raise RuntimeError("Could not open GStreamer input")
 
     picam2.start()
+    camera_started = True
     time.sleep(0.5)
 
     while True:
@@ -66,12 +68,22 @@ try:
         edges = cv2.Canny(gray, 100, 200)
         edge_frame = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
         stream.stdin.write(edge_frame.tobytes())
-except KeyboardInterrupt:
+except (KeyboardInterrupt, BrokenPipeError):
     pass
 finally:
     if stream is not None:
-        if stream.stdin is not None:
+        if stream.stdin is not None and stream.poll() is None:
             stream.stdin.close()
-        stream.wait()
-    picam2.stop()
+        if stream.poll() is None:
+            try:
+                stream.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                stream.terminate()
+                try:
+                    stream.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    stream.kill()
+                    stream.wait()
+    if camera_started:
+        picam2.stop()
     picam2.close()
