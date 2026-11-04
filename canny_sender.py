@@ -10,7 +10,7 @@ WIDTH = 640
 HEIGHT = 480
 FPS = 30
 PORT = 5000
-HOST = os.environ.get("VIDEO_HOST", "127.0.0.1")
+HOST = os.environ.get("VIDEO_HOST", "192.168.0.153")
 
 
 def start_gstreamer() -> subprocess.Popen:
