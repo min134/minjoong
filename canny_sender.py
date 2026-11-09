@@ -1,4 +1,6 @@
+import argparse
 import os
+import shutil
 import subprocess
 import time
 
@@ -6,44 +8,75 @@ import cv2
 from picamera2 import Picamera2
 
 
-WIDTH = 640
-HEIGHT = 480
-FPS = 30
 PORT = 5000
-HOST = os.environ.get("VIDEO_HOST", "192.168.0.153")
+PROFILES = {
+    "720p-2000": (1280, 720, 2000),
+    "640x480-500": (640, 480, 500),
+    "720p-4000": (1280, 720, 4000),
+}
 
 
-def start_gstreamer() -> subprocess.Popen:
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Send Canny camera frames over RTP/H264 UDP")
+    parser.add_argument(
+        "--profile",
+        choices=tuple(PROFILES),
+        default=os.environ.get("VIDEO_PROFILE", "640x480-500"),
+        help="resolution and bitrate preset (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("VIDEO_HOST", "192.168.0.153"),
+        help="receiver address; VIDEO_HOST is used when omitted",
+    )
+    parser.add_argument("--port", type=int, default=PORT)
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    return args
+
+
+def start_gstreamer(
+    width: int, height: int, fps: int, bitrate: int, host: str, port: int
+) -> subprocess.Popen:
+    gst_launch = shutil.which("gst-launch-1.0")
+    if gst_launch is None:
+        raise RuntimeError("gst-launch-1.0 was not found in PATH")
     return subprocess.Popen(
         [
-            "gst-launch-1.0",
+            gst_launch,
             "fdsrc",
             "fd=0",
             "!",
             "rawvideoparse",
             "format=bgr",
-            f"width={WIDTH}",
-            f"height={HEIGHT}",
-            f"framerate={FPS}/1",
+            f"width={width}",
+            f"height={height}",
+            f"framerate={fps}/1",
             "!",
             "videoconvert",
             "!",
             "x264enc",
             "tune=zerolatency",
             "speed-preset=ultrafast",
+            f"bitrate={bitrate}",
             "!",
             "rtph264pay",
             "config-interval=1",
             "pt=96",
             "!",
             "udpsink",
-            f"host={HOST}",
-            f"port={PORT}",
+            f"host={host}",
+            f"port={port}",
             "sync=false",
         ],
         stdin=subprocess.PIPE,
     )
 
+
+args = parse_args()
+WIDTH, HEIGHT, BITRATE = PROFILES[args.profile]
+FPS = 30
 
 picam2 = Picamera2()
 config = picam2.create_video_configuration(
@@ -54,7 +87,7 @@ stream = None
 camera_started = False
 
 try:
-    stream = start_gstreamer()
+    stream = start_gstreamer(WIDTH, HEIGHT, FPS, BITRATE, args.host, args.port)
     if stream.stdin is None:
         raise RuntimeError("Could not open GStreamer input")
 
