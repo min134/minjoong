@@ -35,15 +35,14 @@ Raspberry Pi 설정에서 카메라 인터페이스가 enable되어 있는지 �
 패턴 명령을 실행합니다. 수신 측 주소와 포트는 실제 설정에 맞춥니다.
 
 ```bash
-gst-launch-1.0 -e videotestsrc is-live=true pattern=ball \
-  ! video/x-raw,width=640,height=480,framerate=30/1 \
-  ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=500 \
-  ! rtph264pay config-interval=1 pt=96 \
-  ! udpsink host=192.168.0.153 port=5000 sync=false
+sudo apt update && sudo apt install -y python3-gi gir1.2-gstreamer-1.0 \
+  gstreamer1.0-tools gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly
+python3 -c "import gi; gi.require_version('Gst', '1.0'); from gi.repository import Gst; Gst.init(None); print(Gst.version_string())"
 ```
 
-다른 터미널에서 `sudo tcpdump -ni any -c 10 udp port 5000`을 실행한 상태로
-위 명령을 10초 실행해 패킷이 실제로 보이는지 확인합니다.
+`python3 -c`가 GStreamer 버전을 출력해야 송신기를 실행할 수 있습니다.
+GStreamer UDP 경로는 다음 테스트 패턴으로 확인합니다.
 
 ```bash
 timeout 10s gst-launch-1.0 -e videotestsrc is-live=true pattern=ball \
@@ -54,16 +53,17 @@ timeout 10s gst-launch-1.0 -e videotestsrc is-live=true pattern=ball \
 echo "gst-launch exit=$?"
 ```
 
-수신 측 `gstreamer_receiver.sh`에서 영상과 tcpdump 패킷이 확인될 때만
-UDP/GStreamer 경로가 정상인 것으로 판단하고 송신기를 실행합니다. 패킷이 없으면
-`gst-inspect-1.0` 결과와 위 명령의 stderr를 먼저 확인해야 합니다.
+다른 터미널에서 `sudo tcpdump -ni any -c 10 udp port 5000`을 실행하고,
+위 명령의 stderr와 종료 코드가 정상이며 패킷이 보일 때만 UDP 경로가 정상입니다.
+송신기는 더 이상 `gst-launch` stdin/fdsrc를 사용하지 않고 Python GI `appsrc`로
+프레임을 직접 전달하며, 시작 시 pipeline이 `PLAYING`인지 확인합니다.
 
 송신 중 별도 터미널에서 다음 명령으로 프로세스 상태, 필수 플러그인,
 GStreamer stderr, UDP 패킷을 확인할 수 있습니다.
 
 ```bash
-pgrep -af 'camera-udp-sender.py|gst-launch-1.0'
-gst-inspect-1.0 fdsrc rawvideoparse x264enc rtph264pay udpsink
+pgrep -af 'camera-udp-sender.py'
+gst-inspect-1.0 appsrc videoconvert x264enc rtph264pay udpsink
 sudo tcpdump -ni any udp port 5000
 ```
 

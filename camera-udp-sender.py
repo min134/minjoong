@@ -1,12 +1,26 @@
 import argparse
 import os
-import shutil
-import subprocess
 import sys
-import threading
 import time
 
 import cv2
+
+try:
+    import gi
+
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst
+except (ImportError, ValueError) as exc:
+    print(
+        "Python GI/GStreamer is required. Install it with:\n"
+        "sudo apt update && sudo apt install -y python3-gi "
+        "gir1.2-gstreamer-1.0 gstreamer1.0-tools "
+        "gstreamer1.0-plugins-base gstreamer1.0-plugins-good "
+        "gstreamer1.0-plugins-ugly",
+        file=sys.stderr,
+    )
+    raise SystemExit(1) from exc
+
 from picamera2 import Picamera2
 
 
@@ -38,66 +52,29 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def start_gstreamer(
-    width: int, height: int, fps: int, bitrate: int, host: str, port: int
-) -> subprocess.Popen:
-    global stderr_thread
-    gst_launch = shutil.which("gst-launch-1.0")
-    if gst_launch is None:
-        raise RuntimeError("gst-launch-1.0 was not found in PATH")
-    stream = subprocess.Popen(
-        [
-            gst_launch,
-            "-e",
-            "fdsrc",
-            "fd=0",
-            f"blocksize={width * height * 3}",
-            "do-timestamp=true",
-            "!",
-            "rawvideoparse",
-            "format=bgr",
-            f"width={width}",
-            f"height={height}",
-            f"framerate={fps}/1",
-            "!",
-            "queue",
-            "max-size-buffers=2",
-            "leaky=downstream",
-            "!",
-            "videoconvert",
-            "!",
-            "x264enc",
-            "tune=zerolatency",
-            "speed-preset=ultrafast",
-            f"bitrate={bitrate}",
-            "!",
-            "rtph264pay",
-            "config-interval=1",
-            "pt=96",
-            "!",
-            "udpsink",
-            f"host={host}",
-            f"port={port}",
-            "sync=false",
-        ],
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
+def start_gstreamer(width: int, height: int, fps: int, bitrate: int, host: str, port: int):
+    Gst.init(None)
+    pipeline = Gst.parse_launch(
+        "appsrc name=source is-live=true format=time do-timestamp=true "
+        f"caps=video/x-raw,format=BGR,width={width},height={height},framerate={fps}/1 "
+        "! videoconvert "
+        f"! x264enc tune=zerolatency speed-preset=ultrafast bitrate={bitrate} "
+        "! rtph264pay config-interval=1 pt=96 "
+        f"! udpsink host={host} port={port} sync=false"
     )
-    stderr_thread = threading.Thread(
-        target=report_gstreamer_stderr,
-        args=(stream,),
-        daemon=True,
-    )
-    stderr_thread.start()
-    return stream
-
-
-def report_gstreamer_stderr(process: subprocess.Popen) -> None:
-    if process.stderr is None:
-        return
-    for line in iter(process.stderr.readline, b""):
-        print(f"[gstreamer] {line.decode(errors='replace')}", end="", file=sys.stderr)
+    appsrc = pipeline.get_by_name("source")
+    if appsrc is None:
+        pipeline.set_state(Gst.State.NULL)
+        raise RuntimeError("GStreamer appsrc element was not created")
+    result = pipeline.set_state(Gst.State.PLAYING)
+    if result == Gst.StateChangeReturn.FAILURE:
+        pipeline.set_state(Gst.State.NULL)
+        raise RuntimeError("GStreamer pipeline failed to enter PLAYING")
+    _, state, _ = pipeline.get_state(5 * Gst.SECOND)
+    if state != Gst.State.PLAYING:
+        pipeline.set_state(Gst.State.NULL)
+        raise RuntimeError(f"GStreamer pipeline state is {state.value_nick}, not PLAYING")
+    return pipeline, appsrc
 
 
 args = parse_args()
@@ -120,17 +97,16 @@ except Exception as exc:
     sys.exit(1)
 
 stream = None
-stderr_thread = None
+appsrc = None
 camera_started = False
 
 
 def write_frame(frame) -> None:
-    if stream is None or stream.stdin is None:
-        raise RuntimeError("GStreamer stdin is not available")
-    if stream.poll() is not None:
-        raise RuntimeError(f"GStreamer exited before frame write (code {stream.returncode})")
-    stream.stdin.write(frame.tobytes())
-    stream.stdin.flush()
+    if appsrc is None:
+        raise RuntimeError("GStreamer appsrc is not available")
+    result = appsrc.emit("push-buffer", Gst.Buffer.new_wrapped(frame.tobytes()))
+    if result != Gst.FlowReturn.OK:
+        raise RuntimeError(f"GStreamer push-buffer failed: {result.value_nick}")
 
 
 try:
@@ -143,7 +119,7 @@ try:
     edges = cv2.Canny(gray, 100, 200)
     edge_frame = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
 
-    stream = start_gstreamer(WIDTH, HEIGHT, FPS, BITRATE, args.host, args.port)
+    stream, appsrc = start_gstreamer(WIDTH, HEIGHT, FPS, BITRATE, args.host, args.port)
     write_frame(edge_frame)
 
     while True:
@@ -158,20 +134,9 @@ except (BrokenPipeError, RuntimeError) as exc:
     print(f"Sender stopped: {exc}", file=sys.stderr)
 finally:
     if stream is not None:
-        if stream.stdin is not None and stream.poll() is None:
-            stream.stdin.close()
-        if stream.poll() is None:
-            try:
-                stream.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                stream.terminate()
-                try:
-                    stream.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    stream.kill()
-                    stream.wait()
-        if stderr_thread is not None:
-            stderr_thread.join(timeout=1)
+        if appsrc is not None:
+            appsrc.emit("end-of-stream")
+        stream.set_state(Gst.State.NULL)
     if camera_started:
         picam2.stop()
     picam2.close()
