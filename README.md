@@ -6,6 +6,20 @@
 기본 프로파일은 `640x480-500`이며, `720p-2000`, `640x480-500`,
 `720p-4000`을 지원합니다. 비트레이트 단위는 kbps입니다.
 
+### 최신 송신 파일 받기
+
+기존 작업 디렉터리를 사용한다면 먼저 원격 `main`을 동기화하고 파일이 있는지 확인합니다.
+
+```bash
+cd ~/1104/minjoong
+git fetch origin
+git pull --ff-only origin main
+test -f camera_udp_sender.py && echo "camera_udp_sender.py is ready"
+```
+
+`camera_udp_sender.py`가 없으면 올바른 저장소 디렉터리인지 `pwd`와
+`git remote -v`로 확인한 뒤 위 명령을 다시 실행합니다.
+
 ```bash
 # Raspberry Pi B의 주소를 명령행으로 지정하면 sudo 환경에서도 안전합니다.
 sudo python3 camera_udp_sender.py --profile 720p-2000 --host 192.168.0.153
