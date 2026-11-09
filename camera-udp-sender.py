@@ -46,6 +46,7 @@ def start_gstreamer(
     return subprocess.Popen(
         [
             gst_launch,
+            "-e",
             "fdsrc",
             "fd=0",
             f"blocksize={width * height * 3}",
@@ -56,6 +57,10 @@ def start_gstreamer(
             f"width={width}",
             f"height={height}",
             f"framerate={fps}/1",
+            "!",
+            "queue",
+            "max-size-buffers=2",
+            "leaky=downstream",
             "!",
             "videoconvert",
             "!",
@@ -74,6 +79,8 @@ def start_gstreamer(
             "sync=false",
         ],
         stdin=subprocess.PIPE,
+        stderr=None,
+        bufsize=0,
     )
 
 
@@ -99,6 +106,16 @@ except Exception as exc:
 stream = None
 camera_started = False
 
+
+def write_frame(frame) -> None:
+    if stream is None or stream.stdin is None:
+        raise RuntimeError("GStreamer stdin is not available")
+    if stream.poll() is not None:
+        raise RuntimeError(f"GStreamer exited before frame write (code {stream.returncode})")
+    stream.stdin.write(frame.tobytes())
+    stream.stdin.flush()
+
+
 try:
     picam2.start()
     camera_started = True
@@ -110,20 +127,18 @@ try:
     edge_frame = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
 
     stream = start_gstreamer(WIDTH, HEIGHT, FPS, BITRATE, args.host, args.port)
-    if stream.stdin is None:
-        raise RuntimeError("Could not open GStreamer input")
-    stream.stdin.write(edge_frame.tobytes())
-    stream.stdin.flush()
+    write_frame(edge_frame)
 
     while True:
         frame = picam2.capture_array()
         gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         edges = cv2.Canny(gray, 100, 200)
         edge_frame = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-        stream.stdin.write(edge_frame.tobytes())
-        stream.stdin.flush()
-except (KeyboardInterrupt, BrokenPipeError):
+        write_frame(edge_frame)
+except KeyboardInterrupt:
     pass
+except (BrokenPipeError, RuntimeError) as exc:
+    print(f"Sender stopped: {exc}", file=sys.stderr)
 finally:
     if stream is not None:
         if stream.stdin is not None and stream.poll() is None:

@@ -45,6 +45,18 @@ gst-launch-1.0 -e videotestsrc is-live=true pattern=ball \
 수신 측 `gstreamer_receiver.sh`에서 영상이 보이면 UDP/GStreamer 경로는 정상이고,
 그 다음 송신기를 실행합니다.
 
+송신 중 별도 터미널에서 다음 명령으로 프로세스 상태, 필수 플러그인,
+GStreamer stderr, UDP 패킷을 확인할 수 있습니다.
+
+```bash
+pgrep -af 'camera-udp-sender.py|gst-launch-1.0'
+gst-inspect-1.0 fdsrc rawvideoparse x264enc rtph264pay udpsink
+sudo tcpdump -ni any udp port 5000
+```
+
+`gst-launch-1.0`가 `PREROLLING`에서 멈추면 카메라와 무관하게 다음
+테스트 패턴을 실행해 GStreamer 경로를 분리 확인합니다.
+
 ```bash
 # Raspberry Pi B의 주소를 명령행으로 지정하면 sudo 환경에서도 안전합니다.
 sudo python3 camera-udp-sender.py --profile 720p-2000 --host 192.168.0.153
