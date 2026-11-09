@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 import cv2
@@ -40,10 +41,11 @@ def parse_args() -> argparse.Namespace:
 def start_gstreamer(
     width: int, height: int, fps: int, bitrate: int, host: str, port: int
 ) -> subprocess.Popen:
+    global stderr_thread
     gst_launch = shutil.which("gst-launch-1.0")
     if gst_launch is None:
         raise RuntimeError("gst-launch-1.0 was not found in PATH")
-    return subprocess.Popen(
+    stream = subprocess.Popen(
         [
             gst_launch,
             "-e",
@@ -79,9 +81,23 @@ def start_gstreamer(
             "sync=false",
         ],
         stdin=subprocess.PIPE,
-        stderr=None,
+        stderr=subprocess.PIPE,
         bufsize=0,
     )
+    stderr_thread = threading.Thread(
+        target=report_gstreamer_stderr,
+        args=(stream,),
+        daemon=True,
+    )
+    stderr_thread.start()
+    return stream
+
+
+def report_gstreamer_stderr(process: subprocess.Popen) -> None:
+    if process.stderr is None:
+        return
+    for line in iter(process.stderr.readline, b""):
+        print(f"[gstreamer] {line.decode(errors='replace')}", end="", file=sys.stderr)
 
 
 args = parse_args()
@@ -104,6 +120,7 @@ except Exception as exc:
     sys.exit(1)
 
 stream = None
+stderr_thread = None
 camera_started = False
 
 
@@ -153,6 +170,8 @@ finally:
                 except subprocess.TimeoutExpired:
                     stream.kill()
                     stream.wait()
+        if stderr_thread is not None:
+            stderr_thread.join(timeout=1)
     if camera_started:
         picam2.stop()
     picam2.close()

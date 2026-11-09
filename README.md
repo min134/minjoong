@@ -42,8 +42,21 @@ gst-launch-1.0 -e videotestsrc is-live=true pattern=ball \
   ! udpsink host=192.168.0.153 port=5000 sync=false
 ```
 
-수신 측 `gstreamer_receiver.sh`에서 영상이 보이면 UDP/GStreamer 경로는 정상이고,
-그 다음 송신기를 실행합니다.
+다른 터미널에서 `sudo tcpdump -ni any -c 10 udp port 5000`을 실행한 상태로
+위 명령을 10초 실행해 패킷이 실제로 보이는지 확인합니다.
+
+```bash
+timeout 10s gst-launch-1.0 -e videotestsrc is-live=true pattern=ball \
+  ! video/x-raw,width=640,height=480,framerate=30/1 \
+  ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=500 \
+  ! rtph264pay config-interval=1 pt=96 \
+  ! udpsink host=192.168.0.153 port=5000 sync=false
+echo "gst-launch exit=$?"
+```
+
+수신 측 `gstreamer_receiver.sh`에서 영상과 tcpdump 패킷이 확인될 때만
+UDP/GStreamer 경로가 정상인 것으로 판단하고 송신기를 실행합니다. 패킷이 없으면
+`gst-inspect-1.0` 결과와 위 명령의 stderr를 먼저 확인해야 합니다.
 
 송신 중 별도 터미널에서 다음 명령으로 프로세스 상태, 필수 플러그인,
 GStreamer stderr, UDP 패킷을 확인할 수 있습니다.
