@@ -20,6 +20,17 @@ test -f camera-udp-sender.py && echo "camera-udp-sender.py is ready"
 `camera-udp-sender.py`가 없으면 올바른 저장소 디렉터리인지 `pwd`와
 `git remote -v`로 확인한 뒤 위 명령을 다시 실행합니다.
 
+카메라가 검출되지 않으면 송신기를 실행하기 전에 다음 명령으로 확인합니다.
+
+```bash
+rpicam-hello --list-cameras
+# 구형 Raspberry Pi OS에서는 다음 명령을 사용합니다.
+libcamera-hello --list-cameras
+```
+
+목록에 카메라가 없으면 CSI 케이블 방향과 양쪽 체결 상태를 확인하고,
+Raspberry Pi 설정에서 카메라 인터페이스가 enable되어 있는지 점검한 뒤 재부팅합니다.
+
 ```bash
 # Raspberry Pi B의 주소를 명령행으로 지정하면 sudo 환경에서도 안전합니다.
 sudo python3 camera-udp-sender.py --profile 720p-2000 --host 192.168.0.153

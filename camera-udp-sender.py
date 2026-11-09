@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 import cv2
@@ -78,11 +79,21 @@ args = parse_args()
 WIDTH, HEIGHT, BITRATE = PROFILES[args.profile]
 FPS = 30
 
-picam2 = Picamera2()
-config = picam2.create_video_configuration(
-    main={"format": "RGB888", "size": (WIDTH, HEIGHT)},
-)
-picam2.configure(config)
+try:
+    picam2 = Picamera2()
+    config = picam2.create_video_configuration(
+        main={"format": "RGB888", "size": (WIDTH, HEIGHT)},
+    )
+    picam2.configure(config)
+except Exception as exc:
+    print(
+        "No camera was detected, so the sender cannot start. Run "
+        "rpicam-hello --list-cameras or libcamera-hello --list-cameras, "
+        f"then check the camera cable and camera enable setting. ({exc})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 stream = None
 camera_started = False
 
