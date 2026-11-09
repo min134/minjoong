@@ -48,6 +48,8 @@ def start_gstreamer(
             gst_launch,
             "fdsrc",
             "fd=0",
+            f"blocksize={width * height * 3}",
+            "do-timestamp=true",
             "!",
             "rawvideoparse",
             "format=bgr",
@@ -98,13 +100,20 @@ stream = None
 camera_started = False
 
 try:
-    stream = start_gstreamer(WIDTH, HEIGHT, FPS, BITRATE, args.host, args.port)
-    if stream.stdin is None:
-        raise RuntimeError("Could not open GStreamer input")
-
     picam2.start()
     camera_started = True
     time.sleep(0.5)
+
+    frame = picam2.capture_array()
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 100, 200)
+    edge_frame = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+
+    stream = start_gstreamer(WIDTH, HEIGHT, FPS, BITRATE, args.host, args.port)
+    if stream.stdin is None:
+        raise RuntimeError("Could not open GStreamer input")
+    stream.stdin.write(edge_frame.tobytes())
+    stream.stdin.flush()
 
     while True:
         frame = picam2.capture_array()
@@ -112,6 +121,7 @@ try:
         edges = cv2.Canny(gray, 100, 200)
         edge_frame = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
         stream.stdin.write(edge_frame.tobytes())
+        stream.stdin.flush()
 except (KeyboardInterrupt, BrokenPipeError):
     pass
 finally:

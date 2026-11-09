@@ -31,6 +31,20 @@ libcamera-hello --list-cameras
 목록에 카메라가 없으면 CSI 케이블 방향과 양쪽 체결 상태를 확인하고,
 Raspberry Pi 설정에서 카메라 인터페이스가 enable되어 있는지 점검한 뒤 재부팅합니다.
 
+카메라 없이 GStreamer UDP 경로만 점검하려면 Raspberry Pi A에서 다음 테스트
+패턴 명령을 실행합니다. 수신 측 주소와 포트는 실제 설정에 맞춥니다.
+
+```bash
+gst-launch-1.0 -e videotestsrc is-live=true pattern=ball \
+  ! video/x-raw,width=640,height=480,framerate=30/1 \
+  ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=500 \
+  ! rtph264pay config-interval=1 pt=96 \
+  ! udpsink host=192.168.0.153 port=5000 sync=false
+```
+
+수신 측 `gstreamer_receiver.sh`에서 영상이 보이면 UDP/GStreamer 경로는 정상이고,
+그 다음 송신기를 실행합니다.
+
 ```bash
 # Raspberry Pi B의 주소를 명령행으로 지정하면 sudo 환경에서도 안전합니다.
 sudo python3 camera-udp-sender.py --profile 720p-2000 --host 192.168.0.153
